@@ -2,9 +2,9 @@
 """
 抓取 @buxiangdangguan 主页推文文本
 - 无需登录，Playwright 无头模式
-- 多选择器容错、详细调试日志
+- 多选择器容错、详细调试日志（输出到 stdout，Actions 步骤日志可见）
 - 增量写入 data/tweets.json
-- 无新推文也正常退出（不报错）
+- 无新推文也正常退出
 """
 import json
 import sys
@@ -19,7 +19,6 @@ URL = f"https://x.com/{USER}"
 DATA_FILE = Path("data/tweets.json")
 DATA_FILE.parent.mkdir(exist_ok=True)
 
-# 多套选择器容错（Twitter 常改 class）
 SELECTORS = {
     "tweet_article": [
         "article[data-testid='tweet']",
@@ -38,6 +37,9 @@ SELECTORS = {
     ],
 }
 
+def log(msg):
+    print(msg, flush=True)
+
 def load_existing():
     if DATA_FILE.exists():
         try:
@@ -49,65 +51,53 @@ def load_existing():
 def save_all(tweets):
     DATA_FILE.write_text(json.dumps(tweets, ensure_ascii=False, indent=2), encoding="utf-8")
 
-def find_element(page, selectors, description=""):
-    """尝试多个选择器，返回第一个匹配的元素"""
-    for sel in selectors:
-        try:
-            el = page.query_selector(sel)
-            if el:
-                return el
-        except Exception:
-            continue
-    return None
-
-def find_elements(page, selectors):
-    """尝试多个选择器，返回第一个匹配的列表"""
+def find_elements(page, selectors, name=""):
     for sel in selectors:
         try:
             els = page.query_selector_all(sel)
             if els:
+                log(f"[DEBUG] {name}: found {len(els)} with selector '{sel}'")
                 return els
-        except Exception:
-            continue
+        except Exception as e:
+            log(f"[DEBUG] {name}: selector '{sel}' error: {e}")
+    log(f"[WARN] {name}: no elements found with any selector")
     return []
 
 def extract_tweets(page):
-    """从页面提取推文：文本 + 时间 + 链接"""
-    print(f"[DEBUG] Page title: {page.title()}")
-    print(f"[DEBUG] Page URL: {page.url}")
+    log(f"[DEBUG] Page title: {page.title()}")
+    log(f"[DEBUG] Page URL: {page.url}")
     
     # 等待任意推文选择器出现
-    tweet_found = False
     for sel in SELECTORS["tweet_article"]:
         try:
             page.wait_for_selector(sel, timeout=5000)
-            tweet_found = True
-            print(f"[DEBUG] Found tweets with selector: {sel}")
+            log(f"[DEBUG] Waited for tweet article: '{sel}'")
             break
         except Exception:
             continue
-    
-    if not tweet_found:
-        print("[WARN] No tweet articles found with any selector")
+    else:
+        log("[WARN] No tweet article selector matched within timeout")
         # 保存页面 HTML 用于调试
         html = page.content()
         Path("debug_page.html").write_text(html, encoding="utf-8")
-        print("[DEBUG] Saved page HTML to debug_page.html")
+        log(f"[DEBUG] Saved page HTML ({len(html)} chars) to debug_page.html")
+        # 打印前 2000 字符看结构
+        log(f"[DEBUG] Page preview: {html[:2000]}")
         return []
 
-    articles = find_elements(page, SELECTORS["tweet_article"])
-    print(f"[DEBUG] Found {len(articles)} tweet articles")
-    
+    articles = find_elements(page, SELECTORS["tweet_article"], "tweet_article")
     results = []
-    for i, art in enumerate(articles[:15]):  # 多抓几条防漏
+    
+    for i, art in enumerate(articles[:15]):
         try:
-            # 推文文本 - 尝试多个选择器
+            # 推文文本
             text = ""
             for text_sel in SELECTORS["tweet_text"]:
                 text_el = art.query_selector(text_sel)
                 if text_el:
                     text = text_el.inner_text().strip()
                     if text:
+                        log(f"[DEBUG] Tweet {i}: text via '{text_sel}' = {text[:80]}...")
                         break
             
             # 时间链接
@@ -138,12 +128,14 @@ def extract_tweets(page):
                     "url": f"https://x.com{link}" if link else f"https://x.com/{USER}/status/{tweet_id}",
                     "scraped_at": datetime.now(timezone.utc).isoformat()
                 })
-                print(f"[DEBUG] Tweet {len(results)}: id={tweet_id}, text={text[:80]}...")
+                log(f"[OK] Tweet {len(results)}: id={tweet_id}, text={text[:80]}...")
             elif text:
-                print(f"[DEBUG] Found text but no ID: {text[:80]}...")
+                log(f"[WARN] Found text but no ID: {text[:80]}...")
+            else:
+                log(f"[DEBUG] Article {i}: no text extracted")
                 
         except Exception as e:
-            print(f"[WARN] Error extracting tweet {i}: {e}")
+            log(f"[WARN] Error extracting tweet {i}: {e}")
             continue
     
     return results
@@ -151,7 +143,7 @@ def extract_tweets(page):
 def main():
     existing = load_existing()
     existing_ids = {t["id"] for t in existing}
-    print(f"[INFO] Loaded {len(existing)} existing tweets")
+    log(f"[INFO] Loaded {len(existing)} existing tweets")
 
     try:
         with sync_playwright() as p:
@@ -166,14 +158,12 @@ def main():
             )
             page = context.new_page()
             
-            print(f"[INFO] Navigating to {URL}")
+            log(f"[INFO] Navigating to {URL}")
             page.goto(URL, wait_until="domcontentloaded", timeout=45000)
-            
-            # 等待网络空闲
             page.wait_for_load_state("networkidle", timeout=15000)
-            page.wait_for_timeout(5000)  # 额外等待 JS 渲染
+            page.wait_for_timeout(5000)
             
-            # 尝试滚动一下触发懒加载
+            # 滚动触发懒加载
             page.mouse.wheel(0, 1000)
             page.wait_for_timeout(2000)
             
@@ -181,34 +171,30 @@ def main():
             browser.close()
             
     except Exception as e:
-        print(f"[ERROR] Scraping failed: {e}")
+        log(f"[ERROR] Scraping failed: {e}")
         traceback.print_exc()
-        # 不抛出异常，让工作流继续（生成 RSS 可能还是有旧数据）
         new_tweets = []
 
-    # 去重 + 合并（新在前）
+    # 去重 + 合并
     merged = []
     for t in new_tweets:
         if t["id"] not in existing_ids:
             merged.append(t)
             existing_ids.add(t["id"])
     merged.extend(existing)
-    # 只保留最近 200 条防膨胀
     merged = merged[:200]
 
     save_all(merged)
 
     new_count = len(merged) - len(existing)
-    print(f"::set-output name=new_count::{new_count}")
+    log(f"::set-output name=new_count::{new_count}")
     
     if new_count > 0:
         for t in merged[:new_count]:
-            print(f"NEW: {t['id']} | {t['text'][:80]}...")
+            log(f"NEW: {t['id']} | {t['text'][:80]}...")
     else:
-        print("No new tweets.")
+        log("No new tweets.")
     
-    # 即使抓取失败也返回成功，避免工作流红标
-    # 只有真正的 Python 异常才会让步骤失败
     sys.exit(0)
 
 if __name__ == "__main__":
