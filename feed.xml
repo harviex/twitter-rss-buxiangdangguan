@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0">
+  <channel>
+    <title>@buxiangdangguan - X Timeline</title>
+    <link>https://x.com/buxiangdangguan</link>
+    <description>自动抓取 @buxiangdangguan 公开推文</description>
+    <language>zh-CN</language>
+    <lastBuildDate>Wed, 12 Aug 2026 16:40:05 GMT</lastBuildDate>
+    <atom:link href="https://harviex.github.io/twitter-rss-buxiangdangguan/feed.xml" rel="self" type="application/rss+xml" />
+  </channel>
+</rss>
