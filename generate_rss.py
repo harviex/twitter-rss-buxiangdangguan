@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 """data/tweets.json → feed.xml (RSS 2.0)"""
 import json
+import re
 from pathlib import Path
 from datetime import datetime
 from xml.etree import ElementTree as ET
 
 DATA_FILE = Path("data/tweets.json")
 OUT_FILE = Path("feed.xml")
+
+# 去掉 t.co 短链接
+TCO_PATTERN = re.compile(r"https?://t\.co/\w+")
+
+def strip_tco(text: str) -> str:
+    """移除文本中的 t.co 链接并清理多余空白"""
+    text = TCO_PATTERN.sub("", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 def build_rss(tweets):
     rss = ET.Element("rss", version="2.0", attrib={
@@ -23,10 +32,11 @@ def build_rss(tweets):
 
     for t in tweets:
         item = ET.SubElement(ch, "item")
-        ET.SubElement(item, "title").text = t["text"][:100]
-        ET.SubElement(item, "link").text = t["url"]
+        clean_text = strip_tco(t["text"])
+        ET.SubElement(item, "title").text = clean_text[:100]
+        # 去掉每条的 link
         ET.SubElement(item, "guid", isPermaLink="false").text = t["id"]
-        ET.SubElement(item, "description").text = t["text"]
+        ET.SubElement(item, "description").text = clean_text
         # parse datetime
         try:
             dt = datetime.fromisoformat(t["datetime"].replace("Z", "+00:00"))
