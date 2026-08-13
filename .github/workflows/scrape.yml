@@ -9,8 +9,6 @@ on:
 
 permissions:
   contents: write  # 需要 push
-  pages: write     # 需要部署 Pages
-  id-token: write  # 需要 OIDC token
 
 jobs:
   scrape:
@@ -56,25 +54,33 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: .
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Deploy to gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # 创建/切换到 gh-pages 分支
+          git checkout -B gh-pages origin/gh-pages 2>/dev/null || git checkout --orphan gh-pages
+          
+          # 清空工作目录，只保留 feed.xml
+          git rm -rf . 2>/dev/null || true
+          
+          # 从 main 分支恢复 feed.xml
+          git checkout origin/main -- feed.xml
+          
+          # 提交并推送
+          git add feed.xml
+          if ! git diff --cached --quiet; then
+            git commit -m "🤖 Deploy feed.xml from main"
+            git push origin gh-pages
+          else
+            echo "No changes to deploy"
+          fi
