@@ -3,7 +3,7 @@
 import json
 import re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from xml.etree import ElementTree as ET
 
 DATA_FILE = Path("data/tweets.json")
@@ -27,7 +27,9 @@ def build_rss(tweets):
     ET.SubElement(ch, "link").text = "https://x.com/buxiangdangguan"
     ET.SubElement(ch, "description").text = "自动抓取 @buxiangdangguan 公开推文"
     ET.SubElement(ch, "language").text = "zh-CN"
-    ET.SubElement(ch, "lastBuildDate").text = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")
+    # 使用北京时间 (UTC+8)
+    bj_now = datetime.utcnow() + timedelta(hours=8)
+    ET.SubElement(ch, "lastBuildDate").text = bj_now.strftime("%a, %d %b %Y %H:%M:%S +0800")
     ET.SubElement(ch, "atom:link", href="https://harviex.github.io/twitter-rss-buxiangdangguan/feed.xml", rel="self", type="application/rss+xml")
 
     for t in tweets:
@@ -36,19 +38,18 @@ def build_rss(tweets):
         ET.SubElement(item, "title").text = clean_text[:100]
         # 去掉每条的 link
         ET.SubElement(item, "guid", isPermaLink="false").text = t["id"]
-        # description: 纯文本 + 发布时间
+        # description: 纯文本 + 发布时间 (北京时间)
         try:
             dt = datetime.fromisoformat(t["datetime"].replace("Z", "+00:00"))
-            pub_str = dt.strftime("%Y-%m-%d %H:%M")
+            bj_dt = dt + timedelta(hours=8)
+            pub_str = bj_dt.strftime("%Y-%m-%d %H:%M")
+            pub_rfc = bj_dt.strftime("%a, %d %b %Y %H:%M:%S +0800")
         except Exception:
-            pub_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+            bj_now = datetime.utcnow() + timedelta(hours=8)
+            pub_str = bj_now.strftime("%Y-%m-%d %H:%M")
+            pub_rfc = bj_now.strftime("%a, %d %b %Y %H:%M:%S +0800")
         ET.SubElement(item, "description").text = f"{clean_text}\n\n{pub_str}"
-        # parse datetime
-        try:
-            dt = datetime.fromisoformat(t["datetime"].replace("Z", "+00:00"))
-            ET.SubElement(item, "pubDate").text = dt.strftime("%a, %d %b %Y %H:%M:%S GMT")
-        except Exception:
-            ET.SubElement(item, "pubDate").text = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")
+        ET.SubElement(item, "pubDate").text = pub_rfc
 
     ET.indent(rss, space="  ")
     OUT_FILE.write_text(ET.tostring(rss, encoding="unicode", xml_declaration=True), encoding="utf-8")
