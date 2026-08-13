@@ -21,19 +21,16 @@ DATA_FILE.parent.mkdir(exist_ok=True)
 
 SELECTORS = {
     "tweet_article": [
-        "article[data-testid='tweet']",
+        "article[data-tweet-id]",
+        "article[itemprop='hasPart']",
         "article[role='article']",
-        "div[data-testid='tweet']",
+        "article",
     ],
     "tweet_text": [
+        "[itemprop='articleBody']",
         "div[data-testid='tweetText']",
         "div[lang]",
         "span[lang]",
-    ],
-    "time_link": [
-        "a time",
-        "time a",
-        "a[href*='/status/'] time",
     ],
 }
 
@@ -95,30 +92,45 @@ def extract_tweets(page):
             for text_sel in SELECTORS["tweet_text"]:
                 text_el = art.query_selector(text_sel)
                 if text_el:
+                    # 先试 inner_text
                     text = text_el.inner_text().strip()
+                    # 如果是 meta 标签，读 content 属性
+                    if not text and text_el.evaluate("el => el.tagName.toLowerCase()") == "meta":
+                        text = text_el.get_attribute("content") or ""
                     if text:
                         log(f"[DEBUG] Tweet {i}: text via '{text_sel}' = {text[:80]}...")
                         break
             
-            # 时间链接
+            # 时间链接 - 从 meta[itemprop] 取
             dt = ""
             link = ""
             tweet_id = ""
-            for time_sel in SELECTORS["time_link"]:
-                time_el = art.query_selector(time_sel)
-                if time_el:
-                    dt = time_el.get_attribute("datetime") or ""
-                    link = time_el.get_attribute("href") or ""
-                    if link:
+            # 先从 article 的 data-tweet-id 取
+            tweet_id = art.get_attribute("data-tweet-id") or ""
+            if tweet_id:
+                link = f"/{USER}/status/{tweet_id}"
+            
+            # 从 meta[itemprop='datePublished'] 或 dateCreated 取时间
+            date_el = art.query_selector("meta[itemprop='datePublished'], meta[itemprop='dateCreated']")
+            if date_el:
+                dt = date_el.get_attribute("content") or ""
+            
+            # 从 meta[itemprop='url'] 取链接
+            url_el = art.query_selector("meta[itemprop='url']")
+            if url_el:
+                href = url_el.get_attribute("content") or ""
+                if href and not link:
+                    link = href.replace(f"https://x.com", "")
+                    if not tweet_id:
                         tweet_id = link.split("/")[-1]
-                    break
             
             # 备选：从 article 直接找 status 链接
-            if not tweet_id:
+            if not tweet_id or not link:
                 status_link = art.query_selector("a[href*='/status/']")
                 if status_link:
                     link = status_link.get_attribute("href") or ""
-                    tweet_id = link.split("/")[-1] if link else ""
+                    if link and not tweet_id:
+                        tweet_id = link.split("/")[-1]
             
             if text and tweet_id:
                 results.append({
@@ -159,9 +171,9 @@ def main():
             page = context.new_page()
             
             log(f"[INFO] Navigating to {URL}")
-            page.goto(URL, wait_until="domcontentloaded", timeout=45000)
-            page.wait_for_load_state("networkidle", timeout=15000)
-            page.wait_for_timeout(5000)
+            page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+            # 不要等 networkidle，X.com 永远不会 idle；直接等推文选择器
+            page.wait_for_timeout(3000)
             
             # 滚动触发懒加载
             page.mouse.wheel(0, 1000)
