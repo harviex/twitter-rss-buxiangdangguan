@@ -36,7 +36,13 @@ def build_rss(tweets):
         ET.SubElement(item, "title").text = clean_text[:100]
         # 去掉每条的 link
         ET.SubElement(item, "guid", isPermaLink="false").text = t["id"]
-        ET.SubElement(item, "description").text = clean_text
+        # description: 纯文本 + 发布时间
+        try:
+            dt = datetime.fromisoformat(t["datetime"].replace("Z", "+00:00"))
+            pub_str = dt.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            pub_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+        ET.SubElement(item, "description").text = f"{clean_text}\n\n{pub_str}"
         # parse datetime
         try:
             dt = datetime.fromisoformat(t["datetime"].replace("Z", "+00:00"))
