@@ -19,18 +19,31 @@ URL = f"https://x.com/{USER}"
 DATA_FILE = Path("data/tweets.json")
 DATA_FILE.parent.mkdir(exist_ok=True)
 
+# 扩展选择器：覆盖原推、转推、引用推、推广推文等结构
 SELECTORS = {
     "tweet_article": [
-        "article[data-tweet-id]",
-        "article[itemprop='hasPart']",
-        "article[role='article']",
-        "article",
+        "article[data-testid='tweet']",           # 现代 X.com 结构
+        "article[data-tweet-id]",                  # 旧结构
+        "article[itemprop='hasPart']",             # Schema.org
+        "article[role='article']",                 # ARIA
+        "div[data-testid='cellInnerDiv'] article", # 列表项内
+        "article",                                 # 兜底
     ],
     "tweet_text": [
-        "[itemprop='articleBody']",
-        "div[data-testid='tweetText']",
-        "div[lang]",
-        "span[lang]",
+        "[data-testid='tweetText']",               # 现代结构
+        "[itemprop='articleBody']",                # Schema.org
+        "div[lang]",                               # 语言标记
+        "span[lang]",                              # 语言标记
+        "div[dir='auto']",                         # 自动方向文本
+    ],
+    "tweet_time": [
+        "time[datetime]",                          # 标准 time 标签
+        "meta[itemprop='datePublished']",
+        "meta[itemprop='dateCreated']",
+    ],
+    "tweet_link": [
+        "a[href*='/status/']",                     # 状态链接
+        "meta[itemprop='url']",
     ],
 }
 
@@ -60,6 +73,47 @@ def find_elements(page, selectors, name=""):
     log(f"[WARN] {name}: no elements found with any selector")
     return []
 
+def extract_tweet_id(art):
+    """从 article 提取 tweet ID，多种方式兜底"""
+    # 1. data-testid='tweet' 的 data-tweet-id
+    tweet_id = art.get_attribute("data-tweet-id")
+    if tweet_id:
+        return tweet_id
+    # 2. 从链接提取
+    status_link = art.query_selector("a[href*='/status/']")
+    if status_link:
+        href = status_link.get_attribute("href") or ""
+        match = re.search(r"/status/(\d+)", href)
+        if match:
+            return match.group(1)
+    # 3. 从 article id 属性
+    art_id = art.get_attribute("id")
+    if art_id and art_id.isdigit():
+        return art_id
+    return ""
+
+def extract_tweet_text(art):
+    """提取推文文本，处理多种结构"""
+    for text_sel in SELECTORS["tweet_text"]:
+        text_el = art.query_selector(text_sel)
+        if text_el:
+            text = text_el.inner_text().strip()
+            if not text and text_el.evaluate("el => el.tagName.toLowerCase()") == "meta":
+                text = text_el.get_attribute("content") or ""
+            if text:
+                return text
+    return ""
+
+def extract_tweet_datetime(art):
+    """提取发布时间"""
+    for time_sel in SELECTORS["tweet_time"]:
+        time_el = art.query_selector(time_sel)
+        if time_el:
+            dt = time_el.get_attribute("datetime") or time_el.get_attribute("content")
+            if dt:
+                return dt
+    return ""
+
 def extract_tweets(page):
     log(f"[DEBUG] Page title: {page.title()}")
     log(f"[DEBUG] Page URL: {page.url}")
@@ -67,77 +121,60 @@ def extract_tweets(page):
     # 等待任意推文选择器出现
     for sel in SELECTORS["tweet_article"]:
         try:
-            page.wait_for_selector(sel, timeout=5000)
+            page.wait_for_selector(sel, timeout=15000)
             log(f"[DEBUG] Waited for tweet article: '{sel}'")
             break
         except Exception:
             continue
     else:
         log("[WARN] No tweet article selector matched within timeout")
-        # 保存页面 HTML 用于调试
         html = page.content()
         Path("debug_page.html").write_text(html, encoding="utf-8")
         log(f"[DEBUG] Saved page HTML ({len(html)} chars) to debug_page.html")
-        # 打印前 2000 字符看结构
-        log(f"[DEBUG] Page preview: {html[:2000]}")
+        log(f"[DEBUG] Page preview: {html[:3000]}")
         return []
 
+    # 多次滚动加载更多推文
+    max_scrolls = 10
+    for scroll_i in range(max_scrolls):
+        page.mouse.wheel(0, 2500)
+        page.wait_for_timeout(2000)
+        articles = find_elements(page, SELECTORS["tweet_article"], "tweet_article")
+        log(f"[DEBUG] After scroll {scroll_i+1}: found {len(articles)} articles")
+        if scroll_i > 2:
+            prev_count = len(find_elements(page, SELECTORS["tweet_article"], "tweet_article"))
+            page.mouse.wheel(0, 2500)
+            page.wait_for_timeout(2000)
+            new_count = len(find_elements(page, SELECTORS["tweet_article"], "tweet_article"))
+            if new_count == prev_count:
+                log(f"[DEBUG] No new articles after scroll, stopping early")
+                break
+    
+    page.wait_for_timeout(3000)
     articles = find_elements(page, SELECTORS["tweet_article"], "tweet_article")
+    log(f"[INFO] Total articles found: {len(articles)}")
+    
     results = []
     
-    for i, art in enumerate(articles[:30]):
+    # 处理所有找到的文章
+    for i, art in enumerate(articles):
         try:
-            # 推文文本
-            text = ""
-            for text_sel in SELECTORS["tweet_text"]:
-                text_el = art.query_selector(text_sel)
-                if text_el:
-                    # 先试 inner_text
-                    text = text_el.inner_text().strip()
-                    # 如果是 meta 标签，读 content 属性
-                    if not text and text_el.evaluate("el => el.tagName.toLowerCase()") == "meta":
-                        text = text_el.get_attribute("content") or ""
-                    if text:
-                        log(f"[DEBUG] Tweet {i}: text via '{text_sel}' = {text[:80]}...")
-                        break
+            # 打印前 5 篇的 HTML 结构用于调试
+            if i < 5:
+                html = art.evaluate("el => el.outerHTML")
+                log(f"[DEBUG] Article {i} HTML preview: {html[:500]}...")
             
-            # 时间链接 - 从 meta[itemprop] 取
-            dt = ""
-            link = ""
-            tweet_id = ""
-            # 先从 article 的 data-tweet-id 取
-            tweet_id = art.get_attribute("data-tweet-id") or ""
-            if tweet_id:
-                link = f"/{USER}/status/{tweet_id}"
-            
-            # 从 meta[itemprop='datePublished'] 或 dateCreated 取时间
-            date_el = art.query_selector("meta[itemprop='datePublished'], meta[itemprop='dateCreated']")
-            if date_el:
-                dt = date_el.get_attribute("content") or ""
-            
-            # 从 meta[itemprop='url'] 取链接
-            url_el = art.query_selector("meta[itemprop='url']")
-            if url_el:
-                href = url_el.get_attribute("content") or ""
-                if href and not link:
-                    link = href.replace(f"https://x.com", "")
-                    if not tweet_id:
-                        tweet_id = link.split("/")[-1]
-            
-            # 备选：从 article 直接找 status 链接
-            if not tweet_id or not link:
-                status_link = art.query_selector("a[href*='/status/']")
-                if status_link:
-                    link = status_link.get_attribute("href") or ""
-                    if link and not tweet_id:
-                        tweet_id = link.split("/")[-1]
+            tweet_id = extract_tweet_id(art)
+            text = extract_tweet_text(art)
+            dt = extract_tweet_datetime(art)
             
             if text and tweet_id:
+                link = f"/{USER}/status/{tweet_id}"
                 results.append({
                     "id": tweet_id,
                     "text": text,
                     "datetime": dt,
-                    "url": f"https://x.com{link}" if link else f"https://x.com/{USER}/status/{tweet_id}",
+                    "url": f"https://x.com{link}",
                     "scraped_at": datetime.now(timezone.utc).isoformat()
                 })
                 log(f"[OK] Tweet {len(results)}: id={tweet_id}, text={text[:80]}...")
@@ -145,7 +182,7 @@ def extract_tweets(page):
                 log(f"[WARN] Found text but no ID: {text[:80]}...")
             else:
                 log(f"[DEBUG] Article {i}: no text extracted")
-                
+               
         except Exception as e:
             log(f"[WARN] Error extracting tweet {i}: {e}")
             continue
@@ -172,10 +209,11 @@ def main():
             
             log(f"[INFO] Navigating to {URL}")
             page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+            
             # 等待推文选择器出现
             for sel in SELECTORS["tweet_article"]:
                 try:
-                    page.wait_for_selector(sel, timeout=10000)
+                    page.wait_for_selector(sel, timeout=15000)
                     log(f"[DEBUG] Waited for tweet article: '{sel}'")
                     break
                 except Exception:
@@ -187,16 +225,24 @@ def main():
                 log(f"[DEBUG] Saved page HTML ({len(html)} chars) to debug_page.html")
                 return []
 
-            # 多次滚动加载更多推文（懒加载）
-            max_scrolls = 5
+            # 多次滚动加载更多推文
+            max_scrolls = 10
             for scroll_i in range(max_scrolls):
-                page.mouse.wheel(0, 2000)
-                page.wait_for_timeout(1500)
-                # 检查是否还有新内容加载
+                page.mouse.wheel(0, 2500)
+                page.wait_for_timeout(2000)
                 articles = find_elements(page, SELECTORS["tweet_article"], "tweet_article")
                 log(f"[DEBUG] After scroll {scroll_i+1}: found {len(articles)} articles")
-            page.wait_for_timeout(2000)
-
+                if scroll_i > 2:
+                    prev_count = len(find_elements(page, SELECTORS["tweet_article"], "tweet_article"))
+                    page.mouse.wheel(0, 2500)
+                    page.wait_for_timeout(2000)
+                    new_count = len(find_elements(page, SELECTORS["tweet_article"], "tweet_article"))
+                    if new_count == prev_count:
+                        log(f"[DEBUG] No new articles after scroll, stopping early")
+                        break
+            
+            page.wait_for_timeout(3000)
+            
             new_tweets = extract_tweets(page)
             browser.close()
             
