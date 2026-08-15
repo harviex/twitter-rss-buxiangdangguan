@@ -23,9 +23,10 @@ def build_rss(tweets):
         "xmlns:content": "http://purl.org/rss/1.0/modules/content/"
     })
     ch = ET.SubElement(rss, "channel")
-    ET.SubElement(ch, "title").text = "@BAIGUANXINGSHU - X Timeline"
-    ET.SubElement(ch, "link").text = "https://x.com/BAIGUANXINGSHU"
-    ET.SubElement(ch, "description").text = "自动抓取 @BAIGUANXINGSHU 公开推文"
+    USER = "buxiangdangguan"
+    ET.SubElement(ch, "title").text = f"@{USER} - X Timeline"
+    ET.SubElement(ch, "link").text = f"https://x.com/{USER}"
+    ET.SubElement(ch, "description").text = f"自动抓取 @{USER} 公开推文"
     ET.SubElement(ch, "language").text = "zh-CN"
     # 使用北京时间 (UTC+8)
     bj_now = datetime.utcnow() + timedelta(hours=8)
