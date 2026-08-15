@@ -85,7 +85,7 @@ def extract_tweets(page):
     articles = find_elements(page, SELECTORS["tweet_article"], "tweet_article")
     results = []
     
-    for i, art in enumerate(articles[:15]):
+    for i, art in enumerate(articles[:30]):
         try:
             # 推文文本
             text = ""
@@ -172,13 +172,31 @@ def main():
             
             log(f"[INFO] Navigating to {URL}")
             page.goto(URL, wait_until="domcontentloaded", timeout=60000)
-            # 不要等 networkidle，X.com 永远不会 idle；直接等推文选择器
-            page.wait_for_timeout(3000)
-            
-            # 滚动触发懒加载
-            page.mouse.wheel(0, 1000)
+            # 等待推文选择器出现
+            for sel in SELECTORS["tweet_article"]:
+                try:
+                    page.wait_for_selector(sel, timeout=10000)
+                    log(f"[DEBUG] Waited for tweet article: '{sel}'")
+                    break
+                except Exception:
+                    continue
+            else:
+                log("[WARN] No tweet article selector matched within timeout")
+                html = page.content()
+                Path("debug_page.html").write_text(html, encoding="utf-8")
+                log(f"[DEBUG] Saved page HTML ({len(html)} chars) to debug_page.html")
+                return []
+
+            # 多次滚动加载更多推文（懒加载）
+            max_scrolls = 5
+            for scroll_i in range(max_scrolls):
+                page.mouse.wheel(0, 2000)
+                page.wait_for_timeout(1500)
+                # 检查是否还有新内容加载
+                articles = find_elements(page, SELECTORS["tweet_article"], "tweet_article")
+                log(f"[DEBUG] After scroll {scroll_i+1}: found {len(articles)} articles")
             page.wait_for_timeout(2000)
-            
+
             new_tweets = extract_tweets(page)
             browser.close()
             
