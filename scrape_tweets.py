@@ -14,7 +14,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from playwright.sync_api import sync_playwright
 
-USER = "buxiangdangguan"
+USER = "BAIGUANXINGSHU"
 URL = f"https://x.com/{USER}"
 DATA_FILE = Path("data/tweets.json")
 DATA_FILE.parent.mkdir(exist_ok=True)
