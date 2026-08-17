@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""data/tweets.json → feed.xml (RSS 2.0)"""
+"""
+data/tweets.json → feed.xml (RSS 2.0)
+"""
 import json
 import re
 from pathlib import Path
@@ -10,12 +12,19 @@ DATA_FILE = Path("data/tweets.json")
 OUT_FILE = Path("feed.xml")
 
 # 去掉 t.co 短链接
-TCO_PATTERN = re.compile(r"https?://t\.co/\w+")
+TCO_PATTERN = re.compile(r"https?://t\\.co/\\w+")
+
 
 def strip_tco(text: str) -> str:
     """移除文本中的 t.co 链接并清理多余空白"""
     text = TCO_PATTERN.sub("", text)
-    return re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\\s+", " ", text).strip()
+
+
+def replace_special(text: str) -> str:
+    """替换特定词汇：三个喝茶的标志 -> 被调查"""
+    return text.replace("三个喝茶的标志", "被调查")
+
 
 def build_rss(tweets):
     rss = ET.Element("rss", version="2.0", attrib={
@@ -23,11 +32,10 @@ def build_rss(tweets):
         "xmlns:content": "http://purl.org/rss/1.0/modules/content/"
     })
     ch = ET.SubElement(rss, "channel")
-    USER = "BAIGUANXINGSHU"
-    DISPLAY_NAME = "观官"
-    ET.SubElement(ch, "title").text = f"@{DISPLAY_NAME} (@{USER}) - X Timeline"
-    ET.SubElement(ch, "link").text = f"https://x.com/{USER}"
-    ET.SubElement(ch, "description").text = f"自动抓取 @{USER} (观官) 公开推文"
+    # Combined feed info
+    ET.SubElement(ch, "title").text = "官方账号合并流 - 不见不散"
+    ET.SubElement(ch, "link").text = "https://harviex.github.io/twitter-rss-buxiangdangguan/"
+    ET.SubElement(ch, "description").text = "合并 @buxiangdangguan 和 @BAIGUANXINGSHU 的公开推文，已去重并应用内容转换"
     ET.SubElement(ch, "language").text = "zh-CN"
     # 使用北京时间 (UTC+8)
     bj_now = datetime.utcnow() + timedelta(hours=8)
@@ -36,13 +44,15 @@ def build_rss(tweets):
 
     for t in tweets:
         clean_text = strip_tco(t["text"])
-        
+        # 应用特殊替换
+        clean_text = replace_special(clean_text)
+
         # 跳过"已官宣"类推文（不生成单独条目）
         if clean_text.startswith("已官宣"):
             continue
-        
+
         item = ET.SubElement(ch, "item")
-        
+
         # 解析发布时间 (北京时间)
         try:
             dt = datetime.fromisoformat(t["datetime"].replace("Z", "+00:00"))
@@ -67,6 +77,7 @@ def build_rss(tweets):
     ET.indent(rss, space="  ")
     OUT_FILE.write_text(ET.tostring(rss, encoding="unicode", xml_declaration=True), encoding="utf-8")
     print(f"Generated {OUT_FILE} with {len(tweets)} items")
+
 
 if __name__ == "__main__":
     tweets = json.loads(DATA_FILE.read_text(encoding="utf-8")) if DATA_FILE.exists() else []

@@ -1,11 +1,11 @@
 <?xml version='1.0' encoding='utf-8'?>
 <rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0">
   <channel>
-    <title>@观官 (@BAIGUANXINGSHU) - X Timeline</title>
-    <link>https://x.com/BAIGUANXINGSHU</link>
-    <description>自动抓取 @BAIGUANXINGSHU (观官) 公开推文</description>
+    <title>官方账号合并流 - 不见不散</title>
+    <link>https://harviex.github.io/twitter-rss-buxiangdangguan/</link>
+    <description>合并 @buxiangdangguan 和 @BAIGUANXINGSHU 的公开推文，已去重并应用内容转换</description>
     <language>zh-CN</language>
-    <lastBuildDate>Sat, 15 Aug 2026 12:37:47 +0800</lastBuildDate>
+    <lastBuildDate>Mon, 17 Aug 2026 14:53:09 +0800</lastBuildDate>
     <atom:link href="https://harviex.github.io/twitter-rss-buxiangdangguan/feed.xml" rel="self" type="application/rss+xml" />
     <item>
       <title>甘肃省委常委，省政府副省长、党组副书记程晓波涉嫌严重违纪违法，目前正接受中央纪委国家监委纪律审查和监察调查。 2026-05-27 01:50</title>
