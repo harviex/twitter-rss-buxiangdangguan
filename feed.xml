@@ -5,8 +5,14 @@
     <link>https://harviex.github.io/twitter-rss-buxiangdangguan/</link>
     <description>合并 @buxiangdangguan 和 @BAIGUANXINGSHU 的公开推文，已去重并应用内容转换</description>
     <language>zh-CN</language>
-    <lastBuildDate>Tue, 18 Aug 2026 21:49:36 +0800</lastBuildDate>
+    <lastBuildDate>Tue, 18 Aug 2026 22:41:17 +0800</lastBuildDate>
     <atom:link href="https://harviex.github.io/twitter-rss-buxiangdangguan/feed.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>江西省宜春市委副书记、市长谭赣明🍵🍵🍵 2026-08-18 21:55</title>
+      <guid isPermaLink="false">2089712670257844692</guid>
+      <description />
+      <pubDate>Tue, 18 Aug 2026 21:55:00 +0800</pubDate>
+    </item>
     <item>
       <title>广东省人民代表大会华侨民族宗教委员会主任委员 李雅林🍵🍵🍵 2026-08-18 20:34</title>
       <guid isPermaLink="false">2089692534297465150</guid>
@@ -38,12 +44,6 @@
       <pubDate>Tue, 18 Aug 2026 14:53:48 +0800</pubDate>
     </item>
     <item>
-      <title>第二十届中央委员、中央军委科学技术委员会主任、中国工程院院士赵晓哲🍵🍵🍵 2026-08-18 12:59</title>
-      <guid isPermaLink="false">2089577993941205278</guid>
-      <description />
-      <pubDate>Tue, 18 Aug 2026 12:59:50 +0800</pubDate>
-    </item>
-    <item>
       <title>广东省人民代表大会华侨民族宗教委员会主任委员李雅林涉嫌严重违纪违法，目前正接受广东省纪委监委纪律审查和监察调查。 2026-08-18 20:35</title>
       <guid isPermaLink="false">2089692711422947717</guid>
       <description />
@@ -72,6 +72,12 @@
       <guid isPermaLink="false">2088284744244981906</guid>
       <description />
       <pubDate>Fri, 14 Aug 2026 23:20:56 +0800</pubDate>
+    </item>
+    <item>
+      <title>第二十届中央委员、中央军委科学技术委员会主任、中国工程院院士赵晓哲🍵🍵🍵 2026-08-18 12:59</title>
+      <guid isPermaLink="false">2089577993941205278</guid>
+      <description />
+      <pubDate>Tue, 18 Aug 2026 12:59:50 +0800</pubDate>
     </item>
     <item>
       <title>四川省文化和旅游厅党组成员、副厅长苟小莉🍵🍵🍵 2026-08-18 12:49</title>
@@ -137,10 +143,10 @@
       <pubDate>Sun, 16 Aug 2026 20:37:29 +0800</pubDate>
     </item>
     <item>
-      <title>甘肃省委常委，省政府副省长、党组副书记程晓波涉嫌严重违纪违法，目前正接受中央纪委国家监委纪律审查和监察调查。 2026-08-18 21:49</title>
+      <title>甘肃省委常委，省政府副省长、党组副书记程晓波涉嫌严重违纪违法，目前正接受中央纪委国家监委纪律审查和监察调查。 2026-08-18 22:41</title>
       <guid isPermaLink="false">2059331475556687991</guid>
       <description />
-      <pubDate>Tue, 18 Aug 2026 21:49:36 +0800</pubDate>
+      <pubDate>Tue, 18 Aug 2026 22:41:17 +0800</pubDate>
     </item>
   </channel>
 </rss>
