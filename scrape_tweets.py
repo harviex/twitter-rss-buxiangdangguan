@@ -156,20 +156,25 @@ def extract_tweets(page, username):
         return []
 
     # 多次滚动加载更多推文
-    max_scrolls = 10
+    max_scrolls = 30  # 增加滚动次数，确保加载足够多
+    no_new_count = 0
     for scroll_i in range(max_scrolls):
-        page.mouse.wheel(0, 2500)
-        page.wait_for_timeout(2000)
+        page.mouse.wheel(0, 3000)
+        page.wait_for_timeout(3000)  # 增加等待时间
         articles = find_elements(page, SELECTORS["tweet_article"], "tweet_article")
         log(f"[DEBUG] After scroll {scroll_i+1}: found {len(articles)} articles")
-        if scroll_i > 2:
-            prev_count = len(find_elements(page, SELECTORS["tweet_article"], "tweet_article"))
-            page.mouse.wheel(0, 2500)
-            page.wait_for_timeout(2000)
+        if scroll_i > 5:
+            prev_count = len(articles)
+            page.mouse.wheel(0, 3000)
+            page.wait_for_timeout(3000)
             new_count = len(find_elements(page, SELECTORS["tweet_article"], "tweet_article"))
             if new_count == prev_count:
-                log(f"[DEBUG] No new articles after scroll, stopping early")
-                break
+                no_new_count += 1
+                if no_new_count >= 3:
+                    log(f"[DEBUG] No new articles after 3 consecutive scrolls, stopping")
+                    break
+            else:
+                no_new_count = 0
 
     page.wait_for_timeout(3000)
     articles = find_elements(page, SELECTORS["tweet_article"], "tweet_article")
