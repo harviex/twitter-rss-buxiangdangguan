@@ -81,4 +81,19 @@ def build_rss(tweets):
 
 if __name__ == "__main__":
     tweets = json.loads(DATA_FILE.read_text(encoding="utf-8")) if DATA_FILE.exists() else []
+    
+    # 统一解析 datetime 以便正确排序
+    from datetime import datetime
+    for t in tweets:
+        dt_str = t.get("datetime", "")
+        for fmt in ["%Y-%m-%dT%H:%M:%S.%fZ", "%a, %d %b %Y %H:%M:%S GMT", "%a, %d %b %Y %H:%M:%S %Z"]:
+            try:
+                t["_parsed"] = datetime.strptime(dt_str, fmt)
+                break
+            except:
+                continue
+    
+    # 按解析后的时间倒序排序
+    tweets.sort(key=lambda x: x.get("_parsed", datetime.min), reverse=True)
+    
     build_rss(tweets)
