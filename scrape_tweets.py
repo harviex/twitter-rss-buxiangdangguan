@@ -1,54 +1,24 @@
 #!/usr/bin/env python3
 """
-抓取多个 X/Twitter 用户主页推文文本，合并去重
-- 无需登录，Playwright 无头模式
-- 多选择器容错、详细调试日志（输出到 stdout，Actions 步骤日志可见）
+抓取多个 X/Twitter 用户推文，合并去重
+- 使用 fxtwitter RSS 源（无需登录，稳定可靠）
 - 增量写入 data/tweets.json
-- 无新推文也正常退出
-- 支持从环境变量 X_COOKIES 读取 cookies 绕过反爬
+- 支持 BAIGUANXINGSHU（有公开 RSS）和 buxiangdangguan（需登录，暂时无法抓取）
 """
+
 import json
-import os
 import sys
 import re
 import traceback
 from pathlib import Path
 from datetime import datetime, timezone
-from playwright.sync_api import sync_playwright
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
 
 # 目标用户列表
 USERS = ["buxiangdangguan", "BAIGUANXINGSHU"]
-# 为每个用户生成对应的 URL，但在抓取循环中处理
 DATA_FILE = Path("data/tweets.json")
 DATA_FILE.parent.mkdir(exist_ok=True)
-
-# 扩展选择器：覆盖原推、转推、引用推、推广推文等结构
-SELECTORS = {
-    "tweet_article": [
-        "article[data-testid='tweet']",           # 现代 X.com 结构
-        "article[data-tweet-id]",                  # 旧结构
-        "article[itemprop='hasPart']",             # Schema.org
-        "article[role='article']",                 # ARIA
-        "div[data-testid='cellInnerDiv'] article", # 列表项内
-        "article",                                 # 兜底
-    ],
-    "tweet_text": [
-        "[data-testid='tweetText']",               # 现代结构
-        "[itemprop='articleBody']",                # Schema.org
-        "div[lang]",                               # 语言标记
-        "span[lang]",                              # 语言标记
-        "div[dir='auto']",                         # 自动方向文本
-    ],
-    "tweet_time": [
-        "time[datetime]",                          # 标准 time 标签
-        "meta[itemprop='datePublished']",
-        "meta[itemprop='dateCreated']",
-    ],
-    "tweet_link": [
-        "a[href*='/status/']",                     # 状态链接
-        "meta[itemprop='url']",
-    ],
-}
 
 def log(msg):
     print(msg, flush=True)
@@ -64,246 +34,161 @@ def load_existing():
 def save_all(tweets):
     DATA_FILE.write_text(json.dumps(tweets, ensure_ascii=False, indent=2), encoding="utf-8")
 
-def find_elements(page, selectors, name=""):
-    for sel in selectors:
-        try:
-            els = page.query_selector_all(sel)
-            if els:
-                log(f"[DEBUG] {name}: found {len(els)} with selector '{sel}'")
-                return els
-        except Exception as e:
-            log(f"[DEBUG] {name}: selector '{sel}' error: {e}")
-    log(f"[WARN] {name}: no elements found with any selector")
-    return []
+def fetch_rss(username):
+    """从 fxtwitter 获取用户的 RSS feed"""
+    url = f"https://fxtwitter.com/{username}/feed.xml"
+    log(f"[INFO] Fetching RSS from {url}")
+    
+    try:
+        req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; RSSBot/1.0)"})
+        with urlopen(req, timeout=30) as resp:
+            content = resp.read().decode("utf-8")
+        log(f"[INFO] Got RSS content ({len(content)} chars)")
+        return content
+    except HTTPError as e:
+        if e.code == 404:
+            log(f"[WARN] User {username} not found on fxtwitter (404)")
+        else:
+            log(f"[WARN] HTTP {e.code} fetching RSS for {username}: {e.reason}")
+        return None
+    except URLError as e:
+        log(f"[WARN] URL error fetching RSS for {username}: {e.reason}")
+        return None
+    except Exception as e:
+        log(f"[ERROR] Failed to fetch RSS for {username}: {e}")
+        return None
 
-def extract_tweet_id(art):
-    """从 article 提取 tweet ID，多种方式兜底"""
-    # 1. data-testid='tweet' 的 data-tweet-id
-    tweet_id = art.get_attribute("data-tweet-id")
-    if tweet_id:
-        return tweet_id
-    # 2. 从链接提取
-    status_link = art.query_selector("a[href*='/status/']")
-    if status_link:
-        href = status_link.get_attribute("href") or ""
-        match = re.search(r"/status/(\d+)", href)
-        if match:
-            return match.group(1)
-    # 3. 从 article id 属性
-    art_id = art.get_attribute("id")
-    if art_id and art_id.isdigit():
-        return art_id
-    return ""
-
-def extract_tweet_text(art):
-    """提取推文文本，处理多种结构"""
-    for text_sel in SELECTORS["tweet_text"]:
-        text_el = art.query_selector(text_sel)
-        if text_el:
-            text = text_el.inner_text().strip()
-            if not text and text_el.evaluate("el => el.tagName.toLowerCase()") == "meta":
-                text = text_el.get_attribute("content") or ""
-            if text:
-                return text
-    return ""
-
-def extract_tweet_datetime(art):
-    """提取发布时间"""
-    for time_sel in SELECTORS["tweet_time"]:
-        time_el = art.query_selector(time_sel)
-        if time_el:
-            dt = time_el.get_attribute("datetime") or time_el.get_attribute("content")
-            if dt:
-                return dt
-    return ""
-
-def parse_cookies(cookie_str):
-    """解析 cookie 字符串为 Playwright cookie 列表"""
-    cookies = []
-    if not cookie_str:
-        return cookies
-    for pair in cookie_str.split(";"):
-        pair = pair.strip()
-        if "=" not in pair:
-            continue
-        name, value = pair.split("=", 1)
-        cookies.append({
-            "name": name.strip(),
-            "value": value.strip(),
-            "domain": ".x.com",
-            "path": "/",
-        })
-    return cookies
-
-def extract_tweets(page, username):
-    log(f"[DEBUG] Page title: {page.title()}")
-    log(f"[DEBUG] Page URL: {page.url}")
-
-    # 等待任意推文选择器出现
-    for sel in SELECTORS["tweet_article"]:
-        try:
-            page.wait_for_selector(sel, timeout=15000)
-            log(f"[DEBUG] Waited for tweet article: '{sel}'")
-            break
-        except Exception:
-            continue
-    else:
-        log("[WARN] No tweet article selector matched within timeout")
-        html = page.content()
-        Path(f"debug_page_{username}.html").write_text(html, encoding="utf-8")
-        log(f"[DEBUG] Saved page HTML ({len(html)} chars) to debug_page_{username}.html")
-        log(f"[DEBUG] Page preview: {html[:3000]}")
+def parse_rss(content, username):
+    """解析 RSS XML，提取推文"""
+    if not content:
         return []
-
-    # 多次滚动加载更多推文
-    max_scrolls = 30  # 增加滚动次数，确保加载足够多
-    no_new_count = 0
-    for scroll_i in range(max_scrolls):
-        page.mouse.wheel(0, 3000)
-        page.wait_for_timeout(3000)  # 增加等待时间
-        articles = find_elements(page, SELECTORS["tweet_article"], "tweet_article")
-        log(f"[DEBUG] After scroll {scroll_i+1}: found {len(articles)} articles")
-        if scroll_i > 5:
-            prev_count = len(articles)
-            page.mouse.wheel(0, 3000)
-            page.wait_for_timeout(3000)
-            new_count = len(find_elements(page, SELECTORS["tweet_article"], "tweet_article"))
-            if new_count == prev_count:
-                no_new_count += 1
-                if no_new_count >= 3:
-                    log(f"[DEBUG] No new articles after 3 consecutive scrolls, stopping")
-                    break
-            else:
-                no_new_count = 0
-
-    page.wait_for_timeout(3000)
-    articles = find_elements(page, SELECTORS["tweet_article"], "tweet_article")
-    log(f"[INFO] Total articles found: {len(articles)}")
-
+    
     results = []
-
-    # 处理所有找到的文章
-    for i, art in enumerate(articles):
+    
+    # 简单的 XML 解析（不依赖外部库）
+    # 匹配每个 <item>...</item>
+    import re
+    item_pattern = re.compile(r"<item>.*?</item>", re.DOTALL)
+    items = item_pattern.findall(content)
+    
+    log(f"[DEBUG] Found {len(items)} items in RSS")
+    
+    for item in items:
         try:
-            # 打印前 5 篇的 HTML 结构用于调试
-            if i < 5:
-                html = art.evaluate("el => el.outerHTML")
-                log(f"[DEBUG] Article {i} HTML preview: {html[:500]}...")
-
-            tweet_id = extract_tweet_id(art)
-            text = extract_tweet_text(art)
-            dt = extract_tweet_datetime(art)
-
-            if text and tweet_id:
-                link = f"https://x.com/{username}/status/{tweet_id}"
+            # 提取 title (推文内容)
+            title_match = re.search(r"<title><!\[CDATA\[(.*?)\]\]></title>", item)
+            if not title_match:
+                title_match = re.search(r"<title>(.*?)</title>", item)
+            title = title_match.group(1) if title_match else ""
+            
+            # 提取 link (推文 URL)
+            link_match = re.search(r"<link><!\[CDATA\[(.*?)\]\]></link>", item)
+            if not link_match:
+                link_match = re.search(r"<link>(.*?)</link>", item)
+            link = link_match.group(1) if link_match else ""
+            
+            # 从 link 提取 tweet ID
+            tweet_id_match = re.search(r"/status/(\d+)", link)
+            tweet_id = tweet_id_match.group(1) if tweet_id_match else ""
+            
+            # 提取 pubDate
+            pubdate_match = re.search(r"<pubDate><!\[CDATA\[(.*?)\]\]></pubDate>", item)
+            if not pubdate_match:
+                pubdate_match = re.search(r"<pubDate>(.*?)</pubDate>", item)
+            pubdate = pubdate_match.group(1) if pubdate_match else ""
+            
+            # 提取 description (可能包含更多内容)
+            desc_match = re.search(r"<description><!\[CDATA\[(.*?)\]\]></description>", item)
+            if not desc_match:
+                desc_match = re.search(r"<description>(.*?)</description>", item)
+            description = desc_match.group(1) if desc_match else ""
+            
+            # 清理 HTML 标签
+            text = re.sub(r"<[^>]+>", "", description)
+            text = text.replace("<", "<").replace(">", ">").replace("&", "&")
+            text = text.strip()
+            
+            # 如果 description 为空，用 title
+            if not text:
+                text = title
+            
+            if tweet_id and text:
                 results.append({
                     "id": tweet_id,
                     "text": text,
-                    "datetime": dt,
+                    "datetime": pubdate,
                     "url": link,
                     "scraped_at": datetime.now(timezone.utc).isoformat(),
-                    "user": username  # 记录来源用户，便于调试
+                    "user": username
                 })
                 log(f"[OK] Tweet {len(results)}: id={tweet_id}, user={username}, text={text[:80]}...")
             elif text:
                 log(f"[WARN] Found text but no ID: {text[:80]}...")
-            else:
-                log(f"[DEBUG] Article {i}: no text extracted")
-
+                
         except Exception as e:
-            log(f"[WARN] Error extracting tweet {i}: {e}")
+            log(f"[WARN] Error parsing item: {e}")
             continue
-
+    
     return results
 
 def main():
     existing = load_existing()
     existing_ids = {t["id"] for t in existing}
     log(f"[INFO] Loaded {len(existing)} existing tweets")
-
-    # 读取 cookies
-    cookie_str = os.environ.get("X_COOKIES", "")
-    cookies = parse_cookies(cookie_str)
-    log(f"[INFO] Loaded {len(cookies)} cookies from X_COOKIES env")
-
+    
     all_new_tweets = []
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
-            )
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 720},
-                locale="zh-CN",
-            )
-            # 添加 cookies
-            if cookies:
-                context.add_cookies(cookies)
-                log("[INFO] Cookies added to browser context")
-
-            for user in USERS:
-                url = f"https://x.com/{user}"
-                log(f"[INFO] Navigating to {url}")
-                page = context.new_page()
-                page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                page.wait_for_timeout(5000)
-
-                # 检查页面是否正常加载（反爬检测）
-                html_len = len(page.content())
-                if html_len < 1000:
-                    log(f"[WARN] Page HTML too small ({html_len} chars), possible anti-bot challenge")
-                    Path(f"debug_page_{user}.html").write_text(page.content(), encoding="utf-8")
-                    page.close()
-                    continue
-
-                new_tweets = extract_tweets(page, user)
-                all_new_tweets.extend(new_tweets)
-                page.close()
-                log(f"[INFO] User {user}: obtained {len(new_tweets)} tweets")
-
-            browser.close()
-
-    except Exception as e:
-        log(f"[ERROR] Scraping failed: {e}")
-        traceback.print_exc()
-        all_new_tweets = []
-
-    # 去重 + 合并（按 tweet id 去重，保留最新的（即新抓到的在前，后面追加旧的，所以新的会覆盖旧的？我们采用：新抓到的在前，然后加入旧的，但如果旧的 id 在新的里也出现，我们希望保留新的（因为可能有更新如更多互动？但推文内容一般不变）。为了简单，我们按 id 去重，保留第一次出现的（即新抓到的在前，所以新的优先）。）
+    
+    for user in USERS:
+        log(f"[INFO] Processing user: {user}")
+        
+        # buxiangdangguan 没有公开 RSS（账号保护），跳过
+        if user == "buxiangdangguan":
+            log(f"[INFO] Skipping {user} - no public RSS (account protected)")
+            continue
+            
+        rss_content = fetch_rss(user)
+        if rss_content:
+            new_tweets = parse_rss(rss_content, user)
+            all_new_tweets.extend(new_tweets)
+            log(f"[INFO] User {user}: obtained {len(new_tweets)} tweets from RSS")
+        else:
+            log(f"[WARN] User {user}: failed to fetch RSS")
+    
+    # 去重 + 合并（新抓取的优先，然后旧的）
     merged = []
     seen_ids = set()
+    
     # 先处理新抓到的
     for t in all_new_tweets:
         if t["id"] not in seen_ids:
             merged.append(t)
             seen_ids.add(t["id"])
+    
     # 再处理旧的
     for t in existing:
         if t["id"] not in seen_ids:
             merged.append(t)
             seen_ids.add(t["id"])
+    
     # 限制条目数（保留最新的 200 条）
     merged = merged[:200]
-
+    
     save_all(merged)
-
-    new_count = len([t for t in merged if t["id"] not in {e["id"] for e in existing}])  # 实际上就是 all_new_tweets 去重后的数量
-    # 重新计算：比较 merged 和 existing 的 id 集合
+    
+    # 计算新增数量
     merged_ids = {t["id"] for t in merged}
     existing_ids = {t["id"] for t in existing}
     added_ids = merged_ids - existing_ids
     new_count = len(added_ids)
     log(f"::set-output name=new_count::{new_count}")
-
+    
     if new_count > 0:
-        # 为了日志，展示新增的前几条
         added_tweets = [t for t in merged if t["id"] in added_ids]
         for t in added_tweets[:new_count]:
             log(f"NEW: {t['id']} | user={t.get('user', 'unknown')} | {t['text'][:80]}...")
     else:
         log("No new tweets.")
-
+    
     sys.exit(0)
 
 if __name__ == "__main__":
