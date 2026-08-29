@@ -5,8 +5,10 @@
 - 多选择器容错、详细调试日志（输出到 stdout，Actions 步骤日志可见）
 - 增量写入 data/tweets.json
 - 无新推文也正常退出
+- 支持从环境变量 X_COOKIES 读取 cookies 绕过反爬
 """
 import json
+import os
 import sys
 import re
 import traceback
@@ -115,6 +117,24 @@ def extract_tweet_datetime(art):
                 return dt
     return ""
 
+def parse_cookies(cookie_str):
+    """解析 cookie 字符串为 Playwright cookie 列表"""
+    cookies = []
+    if not cookie_str:
+        return cookies
+    for pair in cookie_str.split(";"):
+        pair = pair.strip()
+        if "=" not in pair:
+            continue
+        name, value = pair.split("=", 1)
+        cookies.append({
+            "name": name.strip(),
+            "value": value.strip(),
+            "domain": ".x.com",
+            "path": "/",
+        })
+    return cookies
+
 def extract_tweets(page, username):
     log(f"[DEBUG] Page title: {page.title()}")
     log(f"[DEBUG] Page URL: {page.url}")
@@ -196,6 +216,11 @@ def main():
     existing_ids = {t["id"] for t in existing}
     log(f"[INFO] Loaded {len(existing)} existing tweets")
 
+    # 读取 cookies
+    cookie_str = os.environ.get("X_COOKIES", "")
+    cookies = parse_cookies(cookie_str)
+    log(f"[INFO] Loaded {len(cookies)} cookies from X_COOKIES env")
+
     all_new_tweets = []
     try:
         with sync_playwright() as p:
@@ -208,45 +233,25 @@ def main():
                 viewport={"width": 1280, "height": 720},
                 locale="zh-CN",
             )
+            # 添加 cookies
+            if cookies:
+                context.add_cookies(cookies)
+                log("[INFO] Cookies added to browser context")
+
             for user in USERS:
                 url = f"https://x.com/{user}"
                 log(f"[INFO] Navigating to {url}")
                 page = context.new_page()
                 page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(5000)
 
-                # 等待推文选择器出现
-                for sel in SELECTORS["tweet_article"]:
-                    try:
-                        page.wait_for_selector(sel, timeout=15000)
-                        log(f"[DEBUG] Waited for tweet article: '{sel}'")
-                        break
-                    except Exception:
-                        continue
-                else:
-                    log("[WARN] No tweet article selector matched within timeout")
-                    html = page.content()
-                    Path(f"debug_page_{user}.html").write_text(html, encoding="utf-8")
-                    log(f"[DEBUG] Saved page HTML ({len(html)} chars) to debug_page_{user}.html")
+                # 检查页面是否正常加载（反爬检测）
+                html_len = len(page.content())
+                if html_len < 1000:
+                    log(f"[WARN] Page HTML too small ({html_len} chars), possible anti-bot challenge")
+                    Path(f"debug_page_{user}.html").write_text(page.content(), encoding="utf-8")
                     page.close()
                     continue
-
-                # 多次滚动加载更多推文
-                max_scrolls = 10
-                for scroll_i in range(max_scrolls):
-                    page.mouse.wheel(0, 2500)
-                    page.wait_for_timeout(2000)
-                    articles = find_elements(page, SELECTORS["tweet_article"], "tweet_article")
-                    log(f"[DEBUG] After scroll {scroll_i+1}: found {len(articles)} articles")
-                    if scroll_i > 2:
-                        prev_count = len(find_elements(page, SELECTORS["tweet_article"], "tweet_article"))
-                        page.mouse.wheel(0, 2500)
-                        page.wait_for_timeout(2000)
-                        new_count = len(find_elements(page, SELECTORS["tweet_article"], "tweet_article"))
-                        if new_count == prev_count:
-                            log(f"[DEBUG] No new articles after scroll, stopping early")
-                            break
-
-                page.wait_for_timeout(3000)
 
                 new_tweets = extract_tweets(page, user)
                 all_new_tweets.extend(new_tweets)

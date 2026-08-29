@@ -32,6 +32,8 @@ jobs:
 
       - name: Scrape tweets
         id: scrape
+        env:
+          X_COOKIES: ${{ secrets.X_COOKIES }}
         run: python scrape_tweets.py
 
       - name: Generate RSS
