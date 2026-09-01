@@ -1,8 +1,8 @@
-name: Hourly scrape @buxiangdangguan
+name: Hourly RSS - @BAIGUANXINGSHU
 
 on:
   schedule:
-    - cron: "5 * * * *"   # 每小时 5 分（错峰）
+    - cron: "5 * * * *"   # 每小时 5 分（错峰避开整点限流）
   workflow_dispatch:       # 手动触发
   push:
     branches: [main]
@@ -24,16 +24,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Playwright
-        run: |
-          pip install playwright
-          playwright install chromium
-          playwright install-deps chromium
-
-      - name: Scrape tweets
+      - name: Scrape tweets (fxtwitter RSS)
         id: scrape
-        env:
-          X_COOKIES: ${{ secrets.X_COOKIES }}
         run: python scrape_tweets.py
 
       - name: Generate RSS
@@ -45,7 +37,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/tweets.json feed.xml
           if ! git diff --cached --quiet; then
-            git commit -m "🤖 Update tweets from @buxiangdangguan (${{ steps.scrape.outputs.new_count }} new)"
+            git commit -m "🤖 Update tweets from @BAIGUANXINGSHU (${{ steps.scrape.outputs.new_count }} new)"
             git push
           else
             echo "No changes to commit"
@@ -68,16 +60,16 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
+
           # 创建/切换到 gh-pages 分支
           git checkout -B gh-pages origin/gh-pages 2>/dev/null || git checkout --orphan gh-pages
-          
+
           # 清空工作目录，只保留 feed.xml
           git rm -rf . 2>/dev/null || true
-          
+
           # 从 main 分支恢复 feed.xml
           git checkout origin/main -- feed.xml
-          
+
           # 提交并推送
           git add feed.xml
           if ! git diff --cached --quiet; then
