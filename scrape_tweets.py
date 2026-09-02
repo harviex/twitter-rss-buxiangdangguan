@@ -156,7 +156,11 @@ def main():
     existing_ids_now = {t["id"] for t in existing}
     added_ids = merged_ids - existing_ids_now
     new_count = len(added_ids)
-    log(f"::set-output name=new_count::{new_count}")
+    import os
+    github_output = os.environ.get("GITHUB_OUTPUT")
+    if github_output:
+        with open(github_output, "a") as f:
+            f.write(f"new_count={new_count}\n")
 
     if new_count > 0:
         for t in [t for t in merged if t["id"] in added_ids][:new_count]:
