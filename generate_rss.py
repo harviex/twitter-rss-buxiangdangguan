@@ -44,6 +44,10 @@ def build_rss(tweets):
         if clean_text.startswith("已官宣"):
             continue
 
+        # 跳过含"需要联系"的广告/推广类推文
+        if "需要联系" in clean_text:
+            continue
+
         item = ET.SubElement(ch, "item")
 
         try:
