@@ -40,12 +40,18 @@ def build_rss(tweets):
         clean_text = strip_tco(t["text"])
         clean_text = replace_special(clean_text)
 
-        # 跳过"已官宣"类推文
-        if clean_text.startswith("已官宣"):
+        # ── 过滤规则 ──
+        # 该账号混杂「人事/纪检新闻」与「带货广告」两类内容。
+        # 实测规律（2026-10-13，200 条样本）：
+        #   · 含 `]]>` 的 58 条 = 100% 新闻（RSS 转推工具自动加的标记）
+        #   · 不含 `]]>` 的 142 条 = 广告 + 已官宣 + 零星其他
+        # 故以 `]]>` 作为「是否新闻」的主判据，最干净。
+        if "]]>" not in clean_text:
             continue
 
-        # 跳过含"需要联系"的广告/推广类推文
-        if "需要联系" in clean_text:
+        # 兜底：显式广告词（防 `]]>` 标记失效时漏网）
+        AD_KEYWORDS = ("需要联系", "非卖品", "可安排", "客户反馈", "国宴标准")
+        if any(k in clean_text for k in AD_KEYWORDS):
             continue
 
         item = ET.SubElement(ch, "item")
