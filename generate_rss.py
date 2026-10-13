@@ -6,7 +6,8 @@ data/tweets.json → feed.xml (RSS 2.0)
 import json
 import re
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from xml.etree import ElementTree as ET
 
 DATA_FILE = Path("data/tweets.json")
@@ -32,7 +33,7 @@ def build_rss(tweets):
     ET.SubElement(ch, "link").text = "https://harviex.github.io/twitter-rss-buxiangdangguan/"
     ET.SubElement(ch, "description").text = "官方账号 @BAIGUANXINGSHU 推文 RSS（北京时间）"
     ET.SubElement(ch, "language").text = "zh-CN"
-    bj_now = datetime.utcnow() + timedelta(hours=8)
+    bj_now = datetime.now(timezone(timedelta(hours=8)))
     ET.SubElement(ch, "lastBuildDate").text = bj_now.strftime("%a, %d %b %Y %H:%M:%S +0800")
     ET.SubElement(ch, "atom:link", href="https://harviex.github.io/twitter-rss-buxiangdangguan/feed.xml", rel="self", type="application/rss+xml")
 
@@ -40,7 +41,7 @@ def build_rss(tweets):
         clean_text = strip_tco(t["text"])
         clean_text = replace_special(clean_text)
 
-        # ── 过滤规则 ──
+        # 过滤规则
         # 该账号混杂「人事/纪检新闻」与「带货广告」两类内容。
         # 实测规律（2026-10-13，200 条样本）：
         #   · 含 `]]>` 的 58 条 = 100% 新闻（RSS 转推工具自动加的标记）
@@ -48,6 +49,8 @@ def build_rss(tweets):
         # 故以 `]]>` 作为「是否新闻」的主判据，最干净。
         if "]]>" not in clean_text:
             continue
+        # ⚠️ 判据用完必须剥掉标记本身，否则 `]]>` 会泄漏进每条标题
+        clean_text = clean_text.replace("]]>", "").strip()
 
         # 兜底：显式广告词（防 `]]>` 标记失效时漏网）
         AD_KEYWORDS = ("需要联系", "非卖品", "可安排", "客户反馈", "国宴标准")
@@ -57,12 +60,21 @@ def build_rss(tweets):
         item = ET.SubElement(ch, "item")
 
         try:
-            dt = datetime.fromisoformat(t["datetime"].replace("Z", "+00:00"))
-            bj_dt = dt + timedelta(hours=8)
+            # ⚠️ datetime 是 RFC 2822 格式（"Mon, 12 Oct 2026 12:03:58 GMT"），
+            # fromisoformat 解析不了 → 全部落进 except → pubDate 全变成「生成时间」。
+            # 踩过的坑：这导致每次跑所有条目都显示"刚刚发布"，
+            # RSS 阅读器按 pubDate 判断新旧 → 永远看不到新内容。
+            # 必须用 parsedate_to_datetime（专解析 RFC 2822）。
+            dt = parsedate_to_datetime(t["datetime"])
+            if dt is None:
+                raise ValueError("unparseable")
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            bj_dt = dt.astimezone(timezone(timedelta(hours=8)))
             pub_str = bj_dt.strftime("%Y-%m-%d %H:%M")
             pub_rfc = bj_dt.strftime("%a, %d %b %Y %H:%M:%S +0800")
         except Exception:
-            bj_now = datetime.utcnow() + timedelta(hours=8)
+            bj_now = datetime.now(timezone(timedelta(hours=8)))
             pub_str = bj_now.strftime("%Y-%m-%d %H:%M")
             pub_rfc = bj_now.strftime("%a, %d %b %Y %H:%M:%S +0800")
 
