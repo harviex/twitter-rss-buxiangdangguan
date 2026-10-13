@@ -8,16 +8,25 @@
 import json
 import re
 import sys
+import time
 from pathlib import Path
 from datetime import datetime, timezone
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
+from email.utils import parsedate_to_datetime
 
 USERS = ["BAIGUANXINGSHU"]
 DATA_FILE = Path("data/tweets.json")
 DATA_FILE.parent.mkdir(exist_ok=True)
 
 RSS_URL = "https://fxtwitter.com/{username}/feed.xml"
+
+# ⚠️ fxtwitter 的 RSS 响应量随机波动（实测 39/59/90 条三种），
+# 单次抓取可能拿到截断的不完整响应 → 新推文漏抓。
+# 实测事故：Actions 连续 4 次拿到同一份过期数据，2 条新推文全漏，
+# 而 pubDate bug 把 staleness 伪装成「每小时都在更新」，肉眼完全看不出来。
+MAX_FETCH_ATTEMPTS = 3
+RETRY_DELAY_SEC = 3
 
 def log(msg):
     print(msg, flush=True)
@@ -115,6 +124,82 @@ def parse_rss(content, username):
 
     return results
 
+def newest_datetime(tweets):
+    """返回列表里最新的推文时间；无法解析的忽略，全失败返回 None。"""
+    best = None
+    for t in tweets:
+        try:
+            dt = parsedate_to_datetime(t.get("datetime", ""))
+            if dt is None:
+                continue
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if best is None or dt > best:
+                best = dt
+        except Exception:
+            continue
+    return best
+
+
+def fetch_rss_best(username, existing_tweets, attempts=MAX_FETCH_ATTEMPTS):
+    """多次抓取，返回「最好」的那次结果。
+
+    评分 = (最新推文时间, 条数)，元组比较。
+    合格判据：响应的最新推文时间 >= 已有数据的最新推文时间
+      —— 说明没有漏掉比已知更晚的推文。
+    只要拿到合格响应就提前停止，否则重试到 attempts 次，最后取最优。
+
+    ⚠️ 不会丢数据：合并逻辑是「新抓的在前、旧的在后」，截断响应只是少抓，
+    不影响已存数据；这个重试只解决「漏抓新推文」。
+    """
+    existing_newest = newest_datetime(existing_tweets)
+    if existing_newest:
+        log(f"[INFO] 已有数据最新推文: {existing_newest}")
+
+    best_tweets = []
+    best_score = None
+
+    for attempt in range(1, attempts + 1):
+        content = fetch_rss(username)
+        if not content:
+            log(f"[WARN] 第 {attempt}/{attempts} 次抓取失败"
+                + ("，等待重试" if attempt < attempts else "，放弃"))
+            if attempt < attempts:
+                time.sleep(RETRY_DELAY_SEC)
+            continue
+
+        tweets = parse_rss(content, username)
+        if not tweets:
+            log(f"[WARN] 第 {attempt}/{attempts} 次解析出 0 条"
+                + ("，等待重试" if attempt < attempts else "，放弃"))
+            if attempt < attempts:
+                time.sleep(RETRY_DELAY_SEC)
+            continue
+
+        newest = newest_datetime(tweets)
+        score = (newest or datetime.min.replace(tzinfo=timezone.utc), len(tweets))
+
+        if best_score is None or score > best_score:
+            best_tweets, best_score = tweets, score
+
+        if existing_newest is None:
+            good = True                      # 首次抓取，没有可比基线
+        else:
+            good = newest is not None and newest >= existing_newest
+
+        log(f"[INFO] 第 {attempt}/{attempts} 次: {len(tweets)} 条 · 最新推文 "
+            f"{newest or '解析失败'} → {'✅ 合格' if good else '⚠️ 不完整（漏了新推文）'}")
+
+        if good:
+            log("[INFO] 拿到合格响应，停止重试")
+            break
+        if attempt < attempts:
+            log(f"[INFO] {RETRY_DELAY_SEC}s 后重试…")
+            time.sleep(RETRY_DELAY_SEC)
+
+    return best_tweets
+
+
 def main():
     existing = load_existing()
     existing_ids = {t["id"] for t in existing}
@@ -124,13 +209,12 @@ def main():
 
     for user in USERS:
         log(f"[INFO] Processing user: {user}")
-        rss_content = fetch_rss(user)
-        if rss_content:
-            new_tweets = parse_rss(rss_content, user)
+        new_tweets = fetch_rss_best(user, existing)
+        if new_tweets:
             all_new_tweets.extend(new_tweets)
-            log(f"[INFO] User {user}: obtained {len(new_tweets)} tweets from RSS")
+            log(f"[INFO] User {user}: 采用 {len(new_tweets)} tweets")
         else:
-            log(f"[WARN] User {user}: failed to fetch RSS")
+            log(f"[WARN] User {user}: {MAX_FETCH_ATTEMPTS} 次尝试后仍无有效数据")
 
     # 去重 + 合并（新抓取的优先，然后旧的）
     merged = []
