@@ -217,11 +217,19 @@ def main():
             log(f"[WARN] User {user}: {MAX_FETCH_ATTEMPTS} 次尝试后仍无有效数据")
 
     # 去重 + 合并（新抓取的优先，然后旧的）
+    # ⚠️ 保留已有条目的 scraped_at：parse_rss 对每次抓到的推文都写新的 scraped_at，
+    # 导致即使没有新推文，数据文件也每次全变 → Actions 每小时都提交一次空提交，
+    # git log 上看不出「到底有没有真的更新」。
+    # 与 pubDate bug 同一类伪装模式：每次都显示"刚更新过"，掩盖真实 staleness。
+    existing_by_id = {t["id"]: t for t in existing}
     merged = []
     seen_ids = set()
 
     for t in all_new_tweets:
         if t["id"] not in seen_ids:
+            old = existing_by_id.get(t["id"])
+            if old and old.get("scraped_at"):
+                t["scraped_at"] = old["scraped_at"]   # 老推文保留首次抓取时间
             merged.append(t)
             seen_ids.add(t["id"])
 
