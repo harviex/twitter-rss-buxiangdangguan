@@ -5,8 +5,14 @@
     <link>https://harviex.github.io/twitter-rss-buxiangdangguan/</link>
     <description>官方账号 @BAIGUANXINGSHU 推文 RSS（北京时间）</description>
     <language>zh-CN</language>
-    <lastBuildDate>Sun, 15 Nov 2026 00:28:23 +0800</lastBuildDate>
+    <lastBuildDate>Sun, 15 Nov 2026 05:14:56 +0800</lastBuildDate>
     <atom:link href="https://harviex.github.io/twitter-rss-buxiangdangguan/feed.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>中央政治局委员，重庆市委书记袁家军涉嫌严重违纪违法，目前正接受中央纪委国家监委纪律审查和监察调查。 2026-11-15 00:53</title>
+      <guid isPermaLink="false">2121647635224252919</guid>
+      <description />
+      <pubDate>Sun, 15 Nov 2026 00:53:09 +0800</pubDate>
+    </item>
     <item>
       <title>甘肃省军区原政治委员孟庆斌涉嫌严重违纪违法，经中央军委研究，决定对孟庆斌立案审查调查。 2026-11-15 00:22</title>
       <guid isPermaLink="false">2121639942480884141</guid>
@@ -816,18 +822,6 @@
       <guid isPermaLink="false">2109616059636429084</guid>
       <description />
       <pubDate>Mon, 12 Oct 2026 20:03:58 +0800</pubDate>
-    </item>
-    <item>
-      <title>第十八届中央委员，重庆原市长，中国国家创新与发展战略研究会学术委员会常务副主席黄奇帆涉嫌严重违纪违法，目前正接受中央纪委国家监委纪律审查和监察调查。 2026-10-12 20:03</title>
-      <guid isPermaLink="false">2109615837606985826</guid>
-      <description />
-      <pubDate>Mon, 12 Oct 2026 20:03:05 +0800</pubDate>
-    </item>
-    <item>
-      <title>山西省朔州市委书记王帅红任山西省委常委、秘书长。 2026-10-12 20:01</title>
-      <guid isPermaLink="false">2109615488838115707</guid>
-      <description />
-      <pubDate>Mon, 12 Oct 2026 20:01:41 +0800</pubDate>
     </item>
   </channel>
 </rss>
